@@ -2,7 +2,7 @@
 
 ## Delivery status
 
-Code and mocked-provider tests are implemented on `multi-user-app`. **No live Auth0 tenant or Render pilot is configured.** Yahoo provisioning and permission for the hosted use case are unverified; the last checked email was an application acknowledgment, not approval. Real Yahoo refresh, ChatGPT linking, and the two-account acceptance test remain pending. Do not advertise this branch as a working public service.
+Code and mocked-provider tests are implemented on `multi-user-app`. **Auth0 Free was verified and a dedicated regular-web client named `Yahoo Fantasy Private Pilot — ChatGPT` was created with Google and password connections disabled. Yahoo integration and Render deployment are not configured.** Yahoo provisioning and permission for the hosted use case are unverified; the last checked email was an application acknowledgment, not approval. Real Yahoo refresh, ChatGPT linking, and the two-account acceptance test remain pending. Do not advertise this branch as a working public service.
 
 `main`, its existing deployment, its dependency manifest, and personal setup remain separate. This branch exposes only leagues, own current roster, and standings through a new hosted entry point. There is no billing, public signup, invitation sender, app-store submission, or database.
 
@@ -82,3 +82,13 @@ Pending live checklist:
 - [ ] First-request cold-start behavior documented with the testers.
 
 Inspect status-only Render logs and provider dashboards for failures; never enable request/body/token debug logging. Check free usage limits manually during the pilot. If isolation or refresh fails, suspend only the pilot service and remove its grants; do not modify the personal service. No merge to `main` or public submission is part of this release.
+
+## Review hardening
+
+The hosted entry point refuses any `YAHOO_*` environment variable and skips personal dotenv initialization. Hosted execution requires request credentials even if a future handler forgets to bind them. Single-user entry points retain their environment behavior.
+
+Set `PILOT_ALLOWED_CLIENT_IDS` to the exact predefined ChatGPT OAuth client ID, not the backend Token Vault client. Missing or unrecognized `azp` claims fail before provider calls. Unknown signing keys cause one JWKS refresh, throttled to once per five seconds to bound invalid-token traffic.
+
+Each verified hosted cache namespace receives 450 Yahoo requests per rolling hour. Two testers therefore share the existing 900-request local budget without sharing a waiting lock. These are local pilot limits, not a claim about Yahoo's provider quota. Provider-wide limits may still apply. Restart to clear rate-limit and cache state when changing account invitations or connected accounts.
+
+The operator confirmed the pending Yahoo approval is for the single-user developer app. Do not change that app's credentials or callbacks for the pilot. A separate Yahoo pilot registration, approved identity/Fantasy permissions, and a provider-assigned Render URL are still needed before completing Auth0 API audience/callback configuration.

@@ -23,6 +23,7 @@ class PilotSettings:
     client_secret: str = field(repr=False)
     connection: str
     allowed_subjects: frozenset[str]
+    allowed_client_ids: frozenset[str]
 
     def __post_init__(self):
         for url in (self.base_url, self.issuer):
@@ -41,6 +42,8 @@ class PilotSettings:
             raise ValueError("Issuer must end in /; base URL must not")
         if not 1 <= len(self.allowed_subjects) <= 2 or not all(self.allowed_subjects):
             raise ValueError("Configure one or two exact Auth0 subject identifiers")
+        if not self.allowed_client_ids or not all(self.allowed_client_ids) or "*" in self.allowed_client_ids:
+            raise ValueError("Configure exact allowed OAuth client identifiers")
         if not all((self.client_id, self.client_secret, self.connection)):
             raise ValueError("Missing Auth0 vault configuration")
 
@@ -56,6 +59,9 @@ class PilotSettings:
             client_id=os.environ["PILOT_AUTH0_API_CLIENT_ID"],
             client_secret=os.environ["PILOT_AUTH0_API_CLIENT_SECRET"],
             connection=os.environ["PILOT_YAHOO_CONNECTION"],
+            allowed_client_ids=frozenset(
+                x.strip() for x in os.environ["PILOT_ALLOWED_CLIENT_IDS"].split(",") if x.strip()
+            ),
             allowed_subjects=frozenset(
                 x.strip() for x in os.environ["PILOT_ALLOWED_SUBJECTS"].split(",") if x.strip()
             ),
@@ -72,6 +78,7 @@ class PilotVerifier(TokenVerifier):
         self._keys = {}
         self._keys_until = 0.0
         self._lock = asyncio.Lock()
+        self._unknown_refresh_after = 0.0
 
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
@@ -79,7 +86,14 @@ class PilotVerifier(TokenVerifier):
             if header.get("alg") != "RS256" or not isinstance(header.get("kid"), str):
                 return None
             async with self._lock:
-                if time.monotonic() >= self._keys_until:
+                now = time.monotonic()
+                expired = now >= self._keys_until
+                unknown = header["kid"] not in self._keys
+                if expired and now < self._unknown_refresh_after:
+                    return None
+                if expired or (unknown and now >= self._unknown_refresh_after):
+                    # Bound attacker-driven refetches, including failed requests.
+                    self._unknown_refresh_after = now + 5
                     response = await self.client.get(self.settings.issuer + ".well-known/jwks.json")
                     response.raise_for_status()
                     self._keys = {
@@ -88,6 +102,8 @@ class PilotVerifier(TokenVerifier):
                         if key.get("kty") == "RSA" and key.get("use", "sig") == "sig"
                     }
                     self._keys_until = time.monotonic() + 60
+                    if expired:
+                        self._unknown_refresh_after = 0.0
             key = self._keys.get(header["kid"])
             if key is None:
                 return None
@@ -101,12 +117,14 @@ class PilotVerifier(TokenVerifier):
             )
             if claims["sub"] not in self.settings.allowed_subjects:
                 return None
+            if claims.get("azp") not in self.settings.allowed_client_ids:
+                return None
             scope = claims.get("scope", "")
             if not isinstance(scope, str) or SCOPE not in scope.split():
                 return None
             return AccessToken(
                 token=token,
-                client_id=claims.get("azp", "chatgpt"),
+                client_id=claims["azp"],
                 scopes=scope.split(),
                 expires_at=int(claims["exp"]),
                 claims=claims,

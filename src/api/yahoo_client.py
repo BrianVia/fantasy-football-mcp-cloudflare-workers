@@ -13,7 +13,20 @@ from src.api.yahoo_credentials import (
     has_request_credentials,
     update_current_credentials,
 )
-from src.api.yahoo_utils import rate_limiter, response_cache
+from src.api.yahoo_utils import RateLimiter, rate_limiter, response_cache
+
+_hosted_rate_limiters = {}
+
+
+def current_rate_limiter():
+    credentials = get_yahoo_credentials()
+    if credentials.access_token_supplier is None:
+        return rate_limiter
+    if not credentials.cache_namespace:
+        raise RuntimeError("Managed Yahoo access requires a cache namespace")
+    # Keep limiter identity stable for concurrent waiters; restart on re-invitation.
+    return _hosted_rate_limiters.setdefault(credentials.cache_namespace, RateLimiter(max_requests=450))
+
 
 YAHOO_API_BASE = "https://fantasysports.yahooapis.com/fantasy/v2"
 
@@ -60,7 +73,7 @@ async def yahoo_api_call(
         if cached_response is not None:
             return cached_response
 
-    await rate_limiter.acquire()
+    await current_rate_limiter().acquire()
 
     credentials = get_yahoo_credentials()
     if not credentials.access_token:

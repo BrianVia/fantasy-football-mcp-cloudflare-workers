@@ -26,22 +26,17 @@ class RateLimiter:
 
     async def acquire(self):
         """Wait if necessary to respect rate limits."""
-        async with self._lock:
-            now = time.time()
-            while self.requests and self.requests[0] <= now - self.window_seconds:
-                self.requests.popleft()
-
-            if len(self.requests) >= self.max_requests:
-                oldest_request = self.requests[0]
-                wait_time = (oldest_request + self.window_seconds) - now
-                if wait_time > 0:
-                    print(f"Rate limit reached. Waiting {wait_time:.1f} seconds...")
-                    await asyncio.sleep(wait_time)
-                    now = time.time()
-                    while self.requests and self.requests[0] <= now - self.window_seconds:
-                        self.requests.popleft()
-
-            self.requests.append(now)
+        while True:
+            async with self._lock:
+                now = time.time()
+                while self.requests and self.requests[0] <= now - self.window_seconds:
+                    self.requests.popleft()
+                if len(self.requests) < self.max_requests:
+                    self.requests.append(now)
+                    return
+                wait_time = max(0, self.requests[0] + self.window_seconds - now)
+            # A waiter must never hold the lock while sleeping.
+            await asyncio.sleep(wait_time)
 
     def get_status(self) -> Dict[str, Any]:
         """Get current rate limiter status."""

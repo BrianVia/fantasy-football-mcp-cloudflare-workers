@@ -20,7 +20,7 @@ from src.services import analyze_reddit_sentiment
 
 # Import rate limiting and caching utilities
 from src.api.yahoo_utils import rate_limiter, response_cache
-from src.api.yahoo_credentials import get_yahoo_credentials, has_request_credentials
+from src.api.yahoo_credentials import get_yahoo_credentials, has_request_credentials, request_credentials_required
 
 # Import bye week utilities
 from src.utils.bye_weeks import get_bye_week_with_fallback
@@ -62,10 +62,11 @@ from src.handlers import (
 DRAFT_AVAILABLE = True
 
 # Load environment from project root
-load_dotenv(dotenv_path=ENV_FILE_PATH)
+if not request_credentials_required():
+    load_dotenv(dotenv_path=ENV_FILE_PATH)
 
 # Initialize access token in the API module
-if os.getenv("YAHOO_ACCESS_TOKEN"):
+if not request_credentials_required() and os.getenv("YAHOO_ACCESS_TOKEN"):
     set_access_token(os.getenv("YAHOO_ACCESS_TOKEN"))
 
 # Create server instance

@@ -31,6 +31,7 @@ def harness(monkeypatch):
         "backend-secret",
         "yahoo-pilot",
         frozenset({"user-a", "user-b"}),
+        frozenset({"chatgpt"}),
     )
 
     def mint(sub="user-a", **overrides):
@@ -416,7 +417,7 @@ async def test_yahoo_401_retry_policy(harness, monkeypatch, body, count):
 
     monkeypatch.setattr(yahoo_client.aiohttp, "ClientSession", Session)
     supplier = AsyncMock(return_value="renewed-secret")
-    c = YahooCredentials("old-secret", "", "", "", user_id="a", access_token_supplier=supplier)
+    c = YahooCredentials("old-secret", "", "", "", user_id="a", cache_namespace="test-managed-user", access_token_supplier=supplier)
     with use_yahoo_credentials(c):
         with pytest.raises(Exception) as caught:
             await yahoo_client.yahoo_api_call("test", use_cache=False)
@@ -476,7 +477,7 @@ async def test_managed_renewal_success_does_not_touch_personal_environment(harne
 
     monkeypatch.setattr(yahoo_client.aiohttp, "ClientSession", Session)
     supplier = AsyncMock(return_value="new-private-token")
-    credentials = YahooCredentials("old-private-token", "", "", "", access_token_supplier=supplier)
+    credentials = YahooCredentials("old-private-token", "", "", "", cache_namespace="test-managed-user", access_token_supplier=supplier)
     with use_yahoo_credentials(credentials):
         assert await yahoo_client.yahoo_api_call("test", use_cache=False) == {"roster": "ok"}
     assert supplier.await_count == 1
@@ -525,6 +526,7 @@ def test_settings_fail_closed():
             "secret",
             "yahoo",
             frozenset({"a"}),
+            frozenset({"chatgpt"}),
         )
     with pytest.raises(ValueError):
         PilotSettings(
@@ -534,6 +536,7 @@ def test_settings_fail_closed():
             "secret",
             "yahoo",
             frozenset(),
+            frozenset({"chatgpt"}),
         )
     with pytest.raises(ValueError):
         PilotSettings(
@@ -543,6 +546,7 @@ def test_settings_fail_closed():
             "secret",
             "yahoo",
             frozenset({"a", "b", "c"}),
+            frozenset({"chatgpt"}),
         )
 
 
@@ -589,3 +593,86 @@ async def test_account_change_during_renewal_aborts(harness, monkeypatch, caplog
     assert "Reconnect" in payload["error"]
     for secret in (bearer, "backend-secret", "yahoo-user-a", "personal-token-never-use"):
         assert secret not in json.dumps(payload) + caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("azp", [None, "unexpected-client", "backend", ["chatgpt"]])
+async def test_client_binding_rejects_before_provider(harness, azp):
+    async with transport(harness) as session:
+        response = await rpc(session, harness[2](azp=azp), "tools/call",
+                             {"name": "ff_get_leagues", "arguments": {}})
+        assert response.status_code == 401
+    assert harness[3] == []
+
+
+@pytest.mark.asyncio
+async def test_rotated_key_refresh_is_bounded(harness):
+    settings, _, mint, _, _ = harness
+    new_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    new_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(new_key.public_key()))
+    new_jwk.update(kid="rotated", use="sig")
+    hits = []
+    async def upstream(request):
+        hits.append(request)
+        if len(hits) == 1:
+            return await harness[1].get(request.url)
+        return httpx.Response(200, json={"keys": [new_jwk]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+        verifier = PilotVerifier(settings, client)
+        assert await verifier.verify_token(mint())
+        claims = jwt.decode(mint(), options={"verify_signature": False})
+        rotated = jwt.encode(claims, new_key, algorithm="RS256", headers={"kid": "rotated"})
+        assert await verifier.verify_token(rotated)
+        for i in range(10):
+            bad = jwt.encode(claims, new_key, algorithm="RS256", headers={"kid": f"unknown-{i}"})
+            assert await verifier.verify_token(bad) is None
+        assert len(hits) == 2
+
+
+def test_hosted_environment_guard(monkeypatch):
+    from hosted_server import prepare_hosted_environment
+    from src.api.yahoo_credentials import get_yahoo_credentials, require_request_credentials
+    monkeypatch.setenv("YAHOO_ACCESS_TOKEN", "personal-secret")
+    with pytest.raises(RuntimeError, match="Remove personal"):
+        prepare_hosted_environment()
+    with require_request_credentials():
+        with pytest.raises(RuntimeError, match="requires request credentials"):
+            get_yahoo_credentials()
+    assert get_yahoo_credentials().access_token == "personal-secret"
+
+
+@pytest.mark.asyncio
+async def test_saturated_user_does_not_stall_other_user():
+    from src.api.yahoo_client import current_rate_limiter, _hosted_rate_limiters
+    _hosted_rate_limiters.clear()
+    a = YahooCredentials("a", "", "", "", cache_namespace="a", access_token_supplier=AsyncMock())
+    b = replace(a, access_token="b", cache_namespace="b")
+    with use_yahoo_credentials(a):
+        limiter = current_rate_limiter()
+        limiter.max_requests = 1
+        await limiter.acquire()
+        waiting = asyncio.create_task(limiter.acquire())
+    try:
+        await asyncio.sleep(0)
+        assert not limiter._lock.locked()
+        with use_yahoo_credentials(b):
+            await asyncio.wait_for(current_rate_limiter().acquire(), timeout=0.2)
+        assert not waiting.done()
+    finally:
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        _hosted_rate_limiters.clear()
+
+
+@pytest.mark.asyncio
+async def test_jwks_outage_does_not_refetch_per_token(harness):
+    hits = []
+    async def unavailable(request):
+        hits.append(request)
+        return httpx.Response(503)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(unavailable)) as client:
+        verifier = PilotVerifier(harness[0], client)
+        for _ in range(5):
+            assert await verifier.verify_token(harness[2]()) is None
+    assert len(hits) == 1

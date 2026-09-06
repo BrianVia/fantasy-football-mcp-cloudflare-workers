@@ -51,8 +51,27 @@ _request_session: ContextVar[YahooCredentialSession | None] = ContextVar(
 )
 
 
+_require_request: ContextVar[bool] = ContextVar("yahoo_require_request", default=False)
+
+
+def request_credentials_required() -> bool:
+    return _require_request.get() or os.getenv("PILOT_HOSTED_MODE") == "1"
+
+
+@contextmanager
+def require_request_credentials():
+    """Fail closed throughout hosted execution, including future unwrapped handlers."""
+    token = _require_request.set(True)
+    try:
+        yield
+    finally:
+        _require_request.reset(token)
+
+
 def credentials_from_env() -> YahooCredentials:
     """Build the legacy single-user credential set from environment variables."""
+    if request_credentials_required():
+        raise RuntimeError("Hosted Yahoo access requires request credentials")
     return YahooCredentials(
         access_token=os.getenv("YAHOO_ACCESS_TOKEN", ""),
         refresh_token=os.getenv("YAHOO_REFRESH_TOKEN", ""),

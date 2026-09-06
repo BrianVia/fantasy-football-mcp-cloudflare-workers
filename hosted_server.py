@@ -4,7 +4,15 @@ import os
 from src.hosted.auth import PilotSettings
 from src.hosted.server import create_server
 
+
+def prepare_hosted_environment():
+    if any(key.startswith("YAHOO_") for key in os.environ):
+        raise RuntimeError("Remove personal YAHOO_* variables from the hosted service")
+    os.environ["PILOT_HOSTED_MODE"] = "1"
+
+
 if __name__ == "__main__":
+    prepare_hosted_environment()
     server = create_server(PilotSettings.from_env())
     server.run(
         transport="http",

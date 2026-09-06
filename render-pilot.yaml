@@ -24,3 +24,5 @@ services:
         value: yahoo-pilot
       - key: PILOT_ALLOWED_SUBJECTS
         sync: false
+      - key: PILOT_ALLOWED_CLIENT_IDS
+        sync: false

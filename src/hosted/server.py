@@ -14,7 +14,7 @@ from fastmcp.server.dependencies import get_access_token
 from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 
-from src.api.yahoo_credentials import YahooCredentials, use_yahoo_credentials
+from src.api.yahoo_credentials import YahooCredentials, use_yahoo_credentials, require_request_credentials
 from src.api.yahoo_client import NOT_PROVISIONED_ERROR
 from src.hosted.auth import ConnectionError, PilotSettings, PilotVerifier, SCOPE, TokenVault
 
@@ -47,11 +47,16 @@ def create_server(settings: PilotSettings, *, client=None):
     )
 
     # Imported before request contexts exist: legacy helper injection runs once.
-    import fantasy_football_multi_league as legacy
+    with require_request_credentials():
+        import fantasy_football_multi_league as legacy
     from src.handlers.league_handlers import handle_ff_get_leagues, handle_ff_get_standings
     from src.handlers.roster_handlers import handle_ff_get_roster
 
     async def execute(name, league_key=None):
+        with require_request_credentials():
+            return await execute_scoped(name, league_key)
+
+    async def execute_scoped(name, league_key=None):
         bearer = get_access_token()
         if bearer is None:
             return {"error": "Connect your account to use this tool."}
