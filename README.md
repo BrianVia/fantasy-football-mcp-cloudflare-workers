@@ -1,5 +1,7 @@
 # Fantasy Football MCP Server
 
+> **Experimental branch:** multi-user development is planned here. Use [`main`](https://github.com/derekrbreese/fantasy-football-mcp-public/tree/main) for the supported personal server. See the [multi-user roadmap](docs/MULTI_USER_ROADMAP.md) for scope and milestones.
+
 A personal, single-user Model Context Protocol (MCP) server for Yahoo Fantasy Football. It exposes league, roster, matchup, waiver-wire, draft, and lineup-analysis data to AI clients while keeping the underlying fantasy data source separate from the model.
 
 ## Current status
