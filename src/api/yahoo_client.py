@@ -42,7 +42,7 @@ def _cache_key(endpoint: str) -> str:
         return endpoint
 
     credentials = get_yahoo_credentials()
-    namespace = credentials.user_id
+    namespace = credentials.cache_namespace or credentials.user_id
     if not namespace:
         token_fingerprint = hashlib.sha256(credentials.access_token.encode("utf-8")).hexdigest()[:16]
         namespace = f"token:{token_fingerprint}"
@@ -89,18 +89,27 @@ async def yahoo_api_call(
                 if "additional_authorization_required" in text:
                     raise Exception(NOT_PROVISIONED_ERROR)
 
+                if credentials.access_token_supplier and "token_rejected" not in text:
+                    raise Exception("Yahoo connection needs reauthorization. Reconnect Yahoo.")
+
                 if retry_on_auth_fail:
                     refresh_result = await refresh_yahoo_token()
                     if refresh_result.get("status") == "success":
                         return await yahoo_api_call(
                             endpoint, retry_on_auth_fail=False, use_cache=use_cache
                         )
+                    if credentials.access_token_supplier:
+                        raise Exception("Yahoo connection needs reauthorization. Reconnect Yahoo.")
                     raise Exception(
                         f"Yahoo API auth failed and token refresh failed: {text[:200]}"
                     )
 
+                if credentials.access_token_supplier:
+                    raise Exception("Yahoo connection needs reauthorization. Reconnect Yahoo.")
                 raise Exception(f"Yahoo API error 401 after token refresh: {text[:200]}")
 
+            if credentials.access_token_supplier:
+                raise Exception(f"Yahoo API unavailable (HTTP {response.status}). Try again later.")
             text = await response.text()
             raise Exception(f"Yahoo API error {response.status}: {text[:200]}")
 
@@ -114,6 +123,16 @@ async def refresh_yahoo_token() -> Dict:
     exposed through an MCP maintenance tool.
     """
     credentials = get_yahoo_credentials()
+
+    if credentials.access_token_supplier is not None:
+        try:
+            new_token = await credentials.access_token_supplier()
+            if not new_token:
+                raise ValueError("Empty managed token")
+            update_current_credentials(access_token=new_token)
+            return {"status": "success", "message": "Managed token renewed"}
+        except Exception:
+            return {"status": "error", "message": "Reconnect Yahoo to renew access"}
 
     if not all(
         [credentials.client_id, credentials.client_secret, credentials.refresh_token]

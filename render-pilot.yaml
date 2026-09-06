@@ -1,0 +1,26 @@
+# Separate service only. Do not replace the personal render.yaml deployment.
+services:
+  - type: web
+    name: yahoo-fantasy-private-pilot
+    runtime: python
+    plan: free
+    branch: multi-user-app
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements-hosted.txt
+    startCommand: python hosted_server.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: PILOT_BASE_URL
+        sync: false
+      - key: PILOT_AUTH0_ISSUER
+        sync: false
+      - key: PILOT_AUTH0_API_CLIENT_ID
+        sync: false
+      - key: PILOT_AUTH0_API_CLIENT_SECRET
+        sync: false
+      - key: PILOT_YAHOO_CONNECTION
+        value: yahoo-pilot
+      - key: PILOT_ALLOWED_SUBJECTS
+        sync: false

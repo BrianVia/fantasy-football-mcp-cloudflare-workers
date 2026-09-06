@@ -1,6 +1,6 @@
 # Experimental multi-user app roadmap
 
-Status: planning only. This branch does not provide a ready-to-deploy shared service or an approved ChatGPT app.
+Status: private pilot code and mocked tests are available; live provider setup is pending. See [the pilot runbook](PRIVATE_PILOT.md). This branch does not provide a ready-to-deploy shared service or an approved ChatGPT app.
 
 ## Branch boundaries
 

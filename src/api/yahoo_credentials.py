@@ -16,19 +16,22 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, replace
-from typing import Iterator
+from dataclasses import dataclass, field, replace
+from typing import Awaitable, Callable, Iterator
 
 
 @dataclass(frozen=True)
 class YahooCredentials:
     """Credentials required to call and refresh the Yahoo Fantasy API."""
 
-    access_token: str
-    refresh_token: str
+    access_token: str = field(repr=False)
+    refresh_token: str = field(repr=False)
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
     user_id: str | None = None
+    yahoo_user_id: str | None = None
+    cache_namespace: str | None = None
+    access_token_supplier: Callable[[], Awaitable[str]] | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -56,6 +59,7 @@ def credentials_from_env() -> YahooCredentials:
         client_id=os.getenv("YAHOO_CLIENT_ID", ""),
         client_secret=os.getenv("YAHOO_CLIENT_SECRET", ""),
         user_id=os.getenv("YAHOO_GUID") or None,
+        yahoo_user_id=os.getenv("YAHOO_GUID") or None,
     )
 
 

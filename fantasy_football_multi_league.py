@@ -20,6 +20,7 @@ from src.services import analyze_reddit_sentiment
 
 # Import rate limiting and caching utilities
 from src.api.yahoo_utils import rate_limiter, response_cache
+from src.api.yahoo_credentials import get_yahoo_credentials, has_request_credentials
 
 # Import bye week utilities
 from src.utils.bye_weeks import get_bye_week_with_fallback
@@ -78,7 +79,7 @@ async def discover_leagues() -> dict[str, dict[str, Any]]:
     """Discover all active NFL leagues for the authenticated user."""
     global LEAGUES_CACHE
 
-    if LEAGUES_CACHE:
+    if LEAGUES_CACHE and not has_request_credentials():
         return LEAGUES_CACHE
 
     # Get current NFL leagues (game key 461 for 2025)
@@ -114,6 +115,13 @@ async def discover_leagues() -> dict[str, dict[str, Any]]:
                                                         and len(league_info) > 0
                                                     ):
                                                         league_dict = league_info[0]
+                                                        if has_request_credentials() and isinstance(league_dict, list):
+                                                            league_dict = {
+                                                                k: v
+                                                                for part in league_dict
+                                                                if isinstance(part, dict)
+                                                                for k, v in part.items()
+                                                            }
 
                                                         league_key = league_dict.get(
                                                             "league_key", ""
@@ -143,7 +151,8 @@ async def discover_leagues() -> dict[str, dict[str, Any]]:
     except Exception:
         pass  # Silently handle error to not interfere with MCP protocol
 
-    LEAGUES_CACHE = leagues
+    if not has_request_credentials():
+        LEAGUES_CACHE = leagues
     return leagues
 
 
@@ -158,8 +167,12 @@ async def get_user_team_info(league_key: Optional[str]) -> Optional[dict]:
     try:
         data = await yahoo_api_call(f"league/{league_key}/teams")
 
-        # Get user's GUID from environment
-        user_guid = os.getenv("YAHOO_GUID", "your_yahoo_guid_here")
+        # Resolve hosted identity from the active connection; preserve local config.
+        credentials = get_yahoo_credentials()
+        user_guid = (
+            credentials.yahoo_user_id if has_request_credentials()
+            else os.getenv("YAHOO_GUID", "your_yahoo_guid_here")
+        )
 
         # Parse to find user's team
         league = data.get("fantasy_content", {}).get("league", [])
@@ -231,6 +244,8 @@ async def get_user_team_info(league_key: Optional[str]) -> Optional[dict]:
 
         return None
     except Exception:
+        if has_request_credentials():
+            raise
         # Silently handle error to not interfere with MCP protocol
         return None
 

@@ -1,0 +1,7 @@
+# Install in a separate Python 3.12 environment; personal pins remain unchanged.
+-r requirements.txt
+PyJWT[crypto]==2.10.1
+httpx==0.28.1
+# Bound the ASGI stack used by the pinned FastMCP 2.12.3 pilot.
+starlette==1.6.0
+uvicorn==0.52.4
