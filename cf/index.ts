@@ -48,7 +48,7 @@ export default {
         headers: { "content-type": "text/plain; charset=utf-8" },
       });
     }
-    if (url.pathname !== "/mcp") return new Response("Not found", { status: 404 });
+    if (url.pathname !== "/mcp" && url.pathname !== "/restart") return new Response("Not found", { status: 404 });
 
     const auth = request.headers.get("authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
@@ -57,6 +57,12 @@ export default {
     }
 
     // ponytail: single container instance ("main"); it's a single-user server.
-    return getContainer(env.FANTASY, "main").fetch(request);
+    const container = getContainer(env.FANTASY, "main");
+    if (url.pathname === "/restart") {
+      // Container env is read at process start; after `wrangler secret put YAHOO_*` hit this to pick them up.
+      await container.destroy();
+      return Response.json({ restarted: true });
+    }
+    return container.fetch(request);
   },
 };
