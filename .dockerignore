@@ -71,3 +71,11 @@ test_*.py
 .cache/
 .mypy_cache/
 .ruff_cache/
+
+# Cloudflare Worker shim (not part of the image)
+node_modules/
+.wrangler/
+cf/
+wrangler*.jsonc
+package*.json
+tsconfig.json

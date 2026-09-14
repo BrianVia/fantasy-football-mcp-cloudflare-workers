@@ -144,3 +144,8 @@ nohup.out
 oauth_state.json
 session_*.json
 callback_*.html
+
+# Cloudflare Worker shim
+node_modules/
+.wrangler/
+wrangler.local.jsonc
